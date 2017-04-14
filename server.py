@@ -1,132 +1,11 @@
 # coding: utf-8
 from datetime import datetime, timedelta
-from flask import g, render_template, request, jsonify, make_response
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.orm import relationship
+from flask import g, render_template, request, jsonify, make_response,redirect
 from flask_oauthlib.provider import OAuth2Provider
 from flask_oauthlib.contrib.oauth2 import bind_sqlalchemy
 from flask_oauthlib.contrib.oauth2 import bind_cache_grant
+from model import db,SSO_USER,SSO_CLIENT,SSO_GRANT,SSO_TOKEN,SSO_ADMIN
 
-
-db = SQLAlchemy()
-
-
-class SSO_USER(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(40), unique=True, index=True,
-                         nullable=False)
-    passwd = db.Column(db.String(256))
-    reg_time = db.Column(db.DateTime,default=datetime.datetime.utcnow)
-    pic_src = db.Column(db.String(256),default="")
-    email = db.Column(db.String(256),default="")
-    sex = db.Column(db.Integer)
-    address = db.Column(db.String(256))
-    def check_password(self, password):
-        return True
-
-
-class SSO_CLIENT(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    # human readable name
-    name = db.Column(db.String(40))
-    #lient_id = db.Column(db.String(40), primary_key=True)
-    client_secret = db.Column(db.String(55), unique=True, index=True,
-                              nullable=False)
-    client_type = db.Column(db.String(20), default='public')
-    _redirect_uris = db.Column(db.Text)
-    default_scope = db.Column(db.Text, default='email address')
-
-    @property
-    def user(self):
-        return User.query.get(1)
-
-    @property
-    def redirect_uris(self):
-        if self._redirect_uris:
-            return self._redirect_uris.split()
-        return []
-
-    @property
-    def default_redirect_uri(self):
-        return self.redirect_uris[0]
-
-    @property
-    def default_scopes(self):
-        if self.default_scope:
-            return self.default_scope.split()
-        return []
-
-    @property
-    def allowed_grant_types(self):
-        return ['authorization_code', 'password', 'client_credentials',
-                'refresh_token']
-
-
-class SSO_GRANT(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(
-        db.Integer, db.ForeignKey('SSO_USER.id', ondelete='CASCADE')
-    )
-    user = relationship('SSO_USER')
-
-    client_id = db.Column(
-        db.Integer, db.ForeignKey('SSO_CLIENT.id', ondelete='CASCADE'),
-        nullable=False,
-    )
-    client = relationship('SSO_CLIENT')
-    code = db.Column(db.String(255), index=True, nullable=False)
-
-    redirect_uri = db.Column(db.String(255))
-    scope = db.Column(db.Text)
-    expires = db.Column(db.DateTime)
-
-    def delete(self):
-        db.session.delete(self)
-        db.session.commit()
-        return self
-
-    @property
-    def scopes(self):
-        if self.scope:
-            return self.scope.split()
-        return None
-
-
-class SSO_TOKEN(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    client_id = db.Column(
-        Integer, db.ForeignKey('SSO_CLIENT.id', ondelete='CASCADE'),
-        nullable=False,
-    )
-    user_id = db.Column(
-        db.Integer, db.ForeignKey('SSO_USER.id', ondelete='CASCADE')
-    )
-    user = relationship('User')
-    client = relationship('Client')
-    token_type = db.Column(db.String(40))
-    access_token = db.Column(db.String(255))
-    refresh_token = db.Column(db.String(255))
-    expires = db.Column(db.DateTime)
-    scope = db.Column(db.Text)
-
-    def __init__(self, **kwargs):
-        expires_in = kwargs.pop('expires_in', None)
-        if expires_in is not None:
-            self.expires = datetime.utcnow() + timedelta(seconds=expires_in)
-
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-    @property
-    def scopes(self):
-        if self.scope:
-            return self.scope.split()
-        return []
-
-    def delete(self):
-        db.session.delete(self)
-        db.session.commit()
-        return self
 
 
 def current_user():
@@ -158,24 +37,24 @@ def default_provider(app):
 
     @oauth.clientgetter
     def get_client(client_id):
-        return Client.query.filter_by(client_id=client_id).first()
+        return SSO_CLIENT.query.filter_by(client_id=client_id).first()
 
     @oauth.grantgetter
     def get_grant(client_id, code):
-        return Grant.query.filter_by(client_id=client_id, code=code).first()
+        return SSO_GRANT.query.filter_by(client_id=client_id, code=code).first()
 
     @oauth.tokengetter
     def get_token(access_token=None, refresh_token=None):
         if access_token:
-            return Token.query.filter_by(access_token=access_token).first()
+            return SSO_TOKEN.query.filter_by(access_token=access_token).first()
         if refresh_token:
-            return Token.query.filter_by(refresh_token=refresh_token).first()
+            return SSO_TOKEN.query.filter_by(refresh_token=refresh_token).first()
         return None
 
     @oauth.grantsetter
     def set_grant(client_id, code, request, *args, **kwargs):
         expires = datetime.utcnow() + timedelta(seconds=100)
-        grant = Grant(
+        grant = SSO_GRANT(
             client_id=client_id,
             code=code['code'],
             redirect_uri=request.redirect_uri,
@@ -190,7 +69,7 @@ def default_provider(app):
     def set_token(token, request, *args, **kwargs):
         # In real project, a token is unique bound to user and client.
         # Which means, you don't need to create a token every time.
-        tok = Token(**token)
+        tok = SSO_TOKEN(**token)
         tok.user_id = request.user.id
         tok.client_id = request.client.client_id
         db.session.add(tok)
@@ -200,7 +79,7 @@ def default_provider(app):
     def get_user(username, password, *args, **kwargs):
         # This is optional, if you don't need password credential
         # there is no need to implement this method
-        return User.query.filter_by(username=username).first()
+        return User.query.filter_by(name=username).first()
 
     return oauth
 
@@ -210,46 +89,41 @@ def prepare_app(app):
     db.app = app
     db.create_all()
 
-    client1 = Client(
-        name='dev', client_id='dev', client_secret='dev',
-        _redirect_uris=(
-            'http://localhost:8000/authorized '
-            'http://localhost/authorized'
-        ),
+    admin = SSO_ADMIN(
+        name='knowsec',passwd='Knowsec321.123!'
     )
 
-    client2 = Client(
-        name='confidential', client_id='confidential',
-        client_secret='confidential', client_type='confidential',
-        _redirect_uris=(
-            'http://localhost:8000/authorized '
-            'http://localhost/authorized'
-        ),
-    )
+    # client1 = SSO_CLIENT(
+    #     name='wiki', client_id='wiki', client_secret='wiki',
+    #     _redirect_uris=(
+    #         'http://127.0.0.1:8000/authorized '
+    #         'http://127.0.0.1/authorized'
+    #     ),
+    # )
 
-    user = User(username='admin')
+    # user = SSO_USER(name='admin')
 
-    temp_grant = Grant(
-        user_id=1, client_id='confidential',
-        code='12345', scope='email',
-        expires=datetime.utcnow() + timedelta(seconds=100)
-    )
+    # temp_grant = SSO_GRANT(
+    #     user_id=1, client_id='confidential',
+    #     code='12345', scope='email',
+    #     expires=datetime.utcnow() + timedelta(seconds=100)
+    # )
 
-    access_token = Token(
-        user_id=1, client_id='dev', access_token='expired', expires_in=0
-    )
+    # access_token = SSO_TOKEN(
+    #     user_id=1, client_id='dev', access_token='expired', expires_in=0
+    # )
 
-    access_token2 = Token(
-        user_id=1, client_id='dev', access_token='never_expire'
-    )
+    # access_token2 = SSO_TOKEN(
+    #     user_id=1, client_id='dev', access_token='never_expire'
+    # )
 
     try:
-        db.session.add(client1)
-        db.session.add(client2)
-        db.session.add(user)
-        db.session.add(temp_grant)
-        db.session.add(access_token)
-        db.session.add(access_token2)
+        # db.session.add(client1)
+        db.session.add(admin)
+        # db.session.add(user)
+        # db.session.add(temp_grant)
+        # db.session.add(access_token)
+        # db.session.add(access_token2)
         db.session.commit()
     except:
         db.session.rollback()
@@ -262,10 +136,51 @@ def create_server(app, oauth=None):
 
     app = prepare_app(app)
 
-    @app.before_request
-    def load_current_user():
-        user = User.query.get(1)
-        g.user = user
+    # @app.before_request
+    # def load_current_user():
+    #     user = SSO_USER.query.get(1)
+    #     g.user = user
+
+
+    @app.route('/client_reg', methods=['GET', 'POST'])
+    def client_reg():
+        if request.method == 'GET':
+            if(SSO_ADMIN.query.filter_by(name=request.args.get('name'), passwd=request.args.get('passwd')).first()!=None):
+                return render_template("client_reg.html")
+            else:
+                return "滚！"
+        
+        if request.method == 'POST':
+            client1 = SSO_CLIENT(
+                name=request.form['name'], client_id=request.form['id'], client_secret=request.form['secret'],
+                _redirect_uris=(
+                    request.form['uri']
+                ),
+            )
+            try:
+                db.session.add(client1)
+                db.session.commit()
+                return "注册成功"
+            except:
+                db.session.rollback()
+                return "注册失败"
+
+    @app.route('/user_reg', methods=['GET', 'POST'])
+    def user_reg():
+        if request.method == 'GET':
+            return render_template("user_reg.html")
+        
+        if request.method == 'POST':
+            user = SSO_USER(
+                name=request.form['name'], passwd=request.form['passwd'], email=request.form['email']
+            )
+            try:
+                db.session.add(user)
+                db.session.commit()
+                return "注册成功"
+            except:
+                db.session.rollback()
+                return "注册失败"
 
     @app.route('/home')
     def home():
@@ -285,9 +200,12 @@ def create_server(app, oauth=None):
             response = make_response('', 200)
             response.headers['X-Client-ID'] = kwargs.get('client_id')
             return response
-
-        confirm = request.form.get('confirm', 'no')
-        return confirm == 'yes'
+        user=SSO_USER.query.filter_by(name=request.form['name'], passwd=request.form['passwd']).first()
+        if(user!=None):
+            g.user = user
+            return True
+        else:
+            return False
 
     @app.route('/oauth/token', methods=['POST', 'GET'])
     @oauth.token_handler
@@ -303,7 +221,7 @@ def create_server(app, oauth=None):
     @oauth.require_oauth('email')
     def email_api():
         oauth = request.oauth
-        return jsonify(email='me@oauth.net', username=oauth.user.username)
+        return jsonify(email=oauth.user.email, username=oauth.user.name,id=oauth.user.id)
 
     @app.route('/api/client')
     @oauth.require_oauth()
@@ -315,7 +233,7 @@ def create_server(app, oauth=None):
     @oauth.require_oauth('address')
     def address_api(city):
         oauth = request.oauth
-        return jsonify(address=city, username=oauth.user.username)
+        return jsonify(address=city, name=oauth.user.name)
 
     @app.route('/api/method', methods=['GET', 'POST', 'PUT', 'DELETE'])
     @oauth.require_oauth()
@@ -335,7 +253,7 @@ if __name__ == '__main__':
     app.debug = True
     app.secret_key = 'development'
     app.config.update({
-        'SQLALCHEMY_DATABASE_URI': 'sqlite:///test.sqlite'
+        'SQLALCHEMY_DATABASE_URI': 'mysql://root:Knowsec321.@120.76.112.182:3306/knowsec'
     })
     app = create_server(app)
     app.run()

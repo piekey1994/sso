@@ -3,7 +3,9 @@
 {% block body %}
 <h2>Allow?</h2>
 <form action="" method="post">
-  <button name="confirm" value="yes">Confirm</button>
-  <button name="confirm" value="no">Cancel</button>
+  name:<input name="name" type="text"><br>
+  passwd:<input name="passwd" type="password"><br>
+  <input type="submit">
+  <a href="/user_reg">注册</a>
 </form>
 {% endblock %}

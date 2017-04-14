@@ -6,9 +6,9 @@ def create_client(app):
     oauth = OAuth(app)
 
     remote = oauth.remote_app(
-        'dev',
-        consumer_key='dev',
-        consumer_secret='dev',
+        'wiki',
+        consumer_key='wiki',
+        consumer_secret='wiki',
         request_token_params={'scope': 'email'},
         base_url='http://127.0.0.1:5000/api/',
         request_token_url=None,
@@ -35,15 +35,18 @@ def create_client(app):
 
     @app.route('/authorized')
     def authorized():
-        resp = remote.authorized_response()
-        if resp is None:
-            return 'Access denied: error=%s' % (
-                request.args['error']
-            )
-        if isinstance(resp, dict) and 'access_token' in resp:
-            session['dev_token'] = (resp['access_token'], '')
-            return jsonify(resp)
-        return str(resp)
+        try:
+            resp = remote.authorized_response()
+            if resp is None:
+                return 'Access denied: error=%s' % (
+                    request.args['error']
+                )
+            if isinstance(resp, dict) and 'access_token' in resp:
+                session['dev_token'] = (resp['access_token'], '')
+                return jsonify(resp)
+            return str(resp)
+        except:
+            return redirect(url_for('logout'))
 
     @app.route('/client')
     def client_method():
